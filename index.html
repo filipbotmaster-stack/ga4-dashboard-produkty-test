@@ -105,6 +105,43 @@
   <div class="funnel" id="funnel"></div>
 </div>
 
+<div class="conversion-tables" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+  <div class="table-section" style="margin-bottom:0">
+    <h3 style="color:var(--green)">🏆 Top 20 – Nejlepší konverze (min. 30 zobrazení)</h3>
+    <div class="table-wrap" style="max-height:520px">
+      <table>
+        <thead><tr>
+          <th style="position:sticky;top:0;background:var(--card)">#</th>
+          <th style="position:sticky;top:0;background:var(--card)">Produkt</th>
+          <th class="num" style="position:sticky;top:0;background:var(--card)">Zobr.</th>
+          <th class="num" style="position:sticky;top:0;background:var(--card)">Košík</th>
+          <th class="num" style="position:sticky;top:0;background:var(--card)">Nákup</th>
+          <th class="num" style="position:sticky;top:0;background:var(--card)">V→C</th>
+          <th class="num" style="position:sticky;top:0;background:var(--card)">V→P</th>
+        </tr></thead>
+        <tbody id="best-conv"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="table-section" style="margin-bottom:0">
+    <h3 style="color:var(--red)">⚠ Top 20 – Nejhorší konverze (min. 30 zobrazení)</h3>
+    <div class="table-wrap" style="max-height:520px">
+      <table>
+        <thead><tr>
+          <th style="position:sticky;top:0;background:var(--card)">#</th>
+          <th style="position:sticky;top:0;background:var(--card)">Produkt</th>
+          <th class="num" style="position:sticky;top:0;background:var(--card)">Zobr.</th>
+          <th class="num" style="position:sticky;top:0;background:var(--card)">Košík</th>
+          <th class="num" style="position:sticky;top:0;background:var(--card)">Nákup</th>
+          <th class="num" style="position:sticky;top:0;background:var(--card)">V→C</th>
+          <th class="num" style="position:sticky;top:0;background:var(--card)">V→P</th>
+        </tr></thead>
+        <tbody id="worst-conv"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <div class="charts-grid">
   <div class="chart-card"><h3>Top 15 produktů – Zobrazení</h3><canvas id="chart-views"></canvas></div>
   <div class="chart-card"><h3>Top 15 produktů – Tržba (Kč)</h3><canvas id="chart-revenue"></canvas></div>
@@ -244,8 +281,30 @@ function renderAll() {
     <div class="funnel-step"><div class="val">${fmt(totalRevenue)}</div><div class="lbl">Tržba (Kč)</div></div>
   `;
 
+  renderConversionTables();
   renderCharts();
   renderTable();
+}
+
+function renderConversionTables() {
+  const min30 = allData.filter(r => r.views >= 30);
+  const best = [...min30].sort((a, b) => b.v2p - a.v2p).slice(0, 20);
+  const worst = [...min30].sort((a, b) => a.v2p - b.v2p).slice(0, 20);
+
+  function convRow(r, i) {
+    return `<tr>
+      <td>${i + 1}</td>
+      <td title="${r.name}">${shortName(r.name, 45)}</td>
+      <td class="num">${fmt(r.views)}</td>
+      <td class="num">${fmt(r.carts)}</td>
+      <td class="num">${fmt(r.purchases)}</td>
+      <td class="rate-cell">${rateBadge(r.v2c)}</td>
+      <td class="rate-cell">${rateBadge(r.v2p)}</td>
+    </tr>`;
+  }
+
+  document.getElementById('best-conv').innerHTML = best.map((r, i) => convRow(r, i)).join('');
+  document.getElementById('worst-conv').innerHTML = worst.map((r, i) => convRow(r, i)).join('');
 }
 
 function renderCharts() {
