@@ -297,6 +297,7 @@ let GA4_PROPERTY_ID = '266107766';
 let accessToken = null;
 let tokenClient = null;
 let allData = [];
+let rawRows = []; // raw parsed rows before category filtering
 let allCategories = { cat1: new Set(), cat2: new Set(), cat3: new Set() };
 let chartInstances = {};
 let sortCol = 'revenue';
@@ -372,11 +373,10 @@ async function fetchGA4Data() {
   document.getElementById('app').style.display = 'none';
   document.getElementById('btn-load').disabled = true;
 
-  const dateFrom = document.getElementById('date-from').value.replace(/-/g, '');
-  const dateTo = document.getElementById('date-to').value.replace(/-/g, '');
-
-  // Build dimension filter for categories
-  const dimensionFilter = buildCategoryFilter();
+  // Reset category filters on new fetch
+  document.getElementById('cat1').innerHTML = '<option value="">Všechny</option>';
+  document.getElementById('cat2').innerHTML = '<option value="">Všechny</option>';
+  document.getElementById('cat3').innerHTML = '<option value="">Všechny</option>';
 
   const body = {
     dateRanges: [{ startDate: document.getElementById('date-from').value, endDate: document.getElementById('date-to').value }],
@@ -396,10 +396,6 @@ async function fetchGA4Data() {
     orderBys: [{ metric: { metricName: 'itemsViewed' }, desc: true }]
   };
 
-  if (dimensionFilter) {
-    body.dimensionFilter = dimensionFilter;
-  }
-
   try {
     const resp = await fetch(
       `https://analyticsdata.googleapis.com/v1beta/properties/${GA4_PROPERTY_ID}:runReport`,
@@ -411,7 +407,6 @@ async function fetchGA4Data() {
     );
 
     if (resp.status === 401) {
-      // Token expired — re-auth
       tokenClient.requestAccessToken();
       return;
     }
@@ -432,23 +427,8 @@ async function fetchGA4Data() {
   document.getElementById('btn-load').disabled = false;
 }
 
-function buildCategoryFilter() {
-  const filters = [];
-  const cat1 = document.getElementById('cat1').value;
-  const cat2 = document.getElementById('cat2').value;
-  const cat3 = document.getElementById('cat3').value;
-
-  if (cat1) filters.push({ filter: { fieldName: 'itemCategory', stringFilter: { value: cat1, matchType: 'EXACT' } } });
-  if (cat2) filters.push({ filter: { fieldName: 'itemCategory2', stringFilter: { value: cat2, matchType: 'EXACT' } } });
-  if (cat3) filters.push({ filter: { fieldName: 'itemCategory3', stringFilter: { value: cat3, matchType: 'EXACT' } } });
-
-  if (filters.length === 0) return null;
-  if (filters.length === 1) return filters[0];
-  return { andGroup: { expressions: filters } };
-}
-
 function processGA4Response(data) {
-  allCategories = { cat1: new Set(), cat2: new Set(), cat3: new Set() };
+  rawRows = [];
 
   if (!data.rows || data.rows.length === 0) {
     allData = [];
@@ -458,28 +438,74 @@ function processGA4Response(data) {
     return;
   }
 
-  // Aggregate by itemName (rows can have multiple category combos)
-  const map = new Map();
+  // Parse all rows with category info
   for (const row of data.rows) {
     const name = row.dimensionValues[0].value;
     const c1 = row.dimensionValues[1].value || '';
     const c2 = row.dimensionValues[2].value || '';
     const c3 = row.dimensionValues[3].value || '';
 
-    if (c1 && c1 !== '(not set)') allCategories.cat1.add(c1);
-    if (c2 && c2 !== '(not set)') allCategories.cat2.add(c2);
-    if (c3 && c3 !== '(not set)') allCategories.cat3.add(c3);
+    rawRows.push({
+      name,
+      cat1: (c1 && c1 !== '(not set)') ? c1 : '',
+      cat2: (c2 && c2 !== '(not set)') ? c2 : '',
+      cat3: (c3 && c3 !== '(not set)') ? c3 : '',
+      views: parseFloat(row.metricValues[0].value) || 0,
+      carts: parseFloat(row.metricValues[1].value) || 0,
+      purchases: parseFloat(row.metricValues[2].value) || 0,
+      revenue: parseFloat(row.metricValues[3].value) || 0
+    });
+  }
 
-    const views = parseFloat(row.metricValues[0].value) || 0;
-    const carts = parseFloat(row.metricValues[1].value) || 0;
-    const purchases = parseFloat(row.metricValues[2].value) || 0;
-    const revenue = parseFloat(row.metricValues[3].value) || 0;
+  const from = document.getElementById('date-from').value;
+  const to = document.getElementById('date-to').value;
+  document.getElementById('subtitle').textContent = `Gigamat.cz | ${formatDate(from)} – ${formatDate(to)}`;
 
-    if (map.has(name)) {
-      const e = map.get(name);
-      e.views += views; e.carts += carts; e.purchases += purchases; e.revenue += revenue;
+  // Apply category filters and render
+  applyCategoryFilter();
+}
+
+function applyCategoryFilter() {
+  const selCat1 = document.getElementById('cat1').value;
+  const selCat2 = document.getElementById('cat2').value;
+  const selCat3 = document.getElementById('cat3').value;
+
+  // Filter raw rows by selected categories
+  let filtered = rawRows;
+  if (selCat1) filtered = filtered.filter(r => r.cat1 === selCat1);
+  if (selCat2) filtered = filtered.filter(r => r.cat2 === selCat2);
+  if (selCat3) filtered = filtered.filter(r => r.cat3 === selCat3);
+
+  // Build available categories from filtered data (cascading)
+  const availCat1 = new Set();
+  const availCat2 = new Set();
+  const availCat3 = new Set();
+
+  // Cat1: always show all from rawRows
+  rawRows.forEach(r => { if (r.cat1) availCat1.add(r.cat1); });
+
+  // Cat2: filter by selected cat1
+  const rowsForCat2 = selCat1 ? rawRows.filter(r => r.cat1 === selCat1) : rawRows;
+  rowsForCat2.forEach(r => { if (r.cat2) availCat2.add(r.cat2); });
+
+  // Cat3: filter by selected cat1 + cat2
+  let rowsForCat3 = rawRows;
+  if (selCat1) rowsForCat3 = rowsForCat3.filter(r => r.cat1 === selCat1);
+  if (selCat2) rowsForCat3 = rowsForCat3.filter(r => r.cat2 === selCat2);
+  rowsForCat3.forEach(r => { if (r.cat3) availCat3.add(r.cat3); });
+
+  updateDropdown('cat1', availCat1, selCat1);
+  updateDropdown('cat2', availCat2, selCat2);
+  updateDropdown('cat3', availCat3, selCat3);
+
+  // Aggregate filtered rows by itemName
+  const map = new Map();
+  for (const r of filtered) {
+    if (map.has(r.name)) {
+      const e = map.get(r.name);
+      e.views += r.views; e.carts += r.carts; e.purchases += r.purchases; e.revenue += r.revenue;
     } else {
-      map.set(name, { name, views, carts, purchases, revenue });
+      map.set(r.name, { name: r.name, views: r.views, carts: r.carts, purchases: r.purchases, revenue: r.revenue });
     }
   }
 
@@ -491,28 +517,34 @@ function processGA4Response(data) {
     avgPrice: r.purchases > 0 ? r.revenue / r.purchases : 0
   }));
 
-  updateCategoryDropdowns();
-
-  const from = document.getElementById('date-from').value;
-  const to = document.getElementById('date-to').value;
-  document.getElementById('subtitle').textContent = `Gigamat.cz | ${formatDate(from)} – ${formatDate(to)}`;
-
   document.getElementById('loading').style.display = 'none';
   document.getElementById('app').style.display = '';
   renderAll();
 }
 
-function updateCategoryDropdowns() {
-  ['cat1', 'cat2', 'cat3'].forEach(id => {
-    const sel = document.getElementById(id);
-    const current = sel.value;
-    const opts = ['<option value="">Všechny</option>'];
-    [...allCategories[id]].sort((a, b) => a.localeCompare(b, 'cs')).forEach(v => {
-      opts.push(`<option value="${v}" ${v === current ? 'selected' : ''}>${v}</option>`);
-    });
-    sel.innerHTML = opts.join('');
+function updateDropdown(id, values, current) {
+  const sel = document.getElementById(id);
+  const sorted = [...values].sort((a, b) => a.localeCompare(b, 'cs'));
+  const opts = ['<option value="">Všechny</option>'];
+  sorted.forEach(v => {
+    opts.push(`<option value="${v}" ${v === current ? 'selected' : ''}>${v}</option>`);
   });
+  sel.innerHTML = opts.join('');
 }
+
+// Category change handlers — cascading
+document.getElementById('cat1').addEventListener('change', () => {
+  document.getElementById('cat2').value = '';
+  document.getElementById('cat3').value = '';
+  applyCategoryFilter();
+});
+document.getElementById('cat2').addEventListener('change', () => {
+  document.getElementById('cat3').value = '';
+  applyCategoryFilter();
+});
+document.getElementById('cat3').addEventListener('change', () => {
+  applyCategoryFilter();
+});
 
 function formatDate(d) {
   const [y, m, day] = d.split('-');
