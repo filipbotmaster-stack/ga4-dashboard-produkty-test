@@ -159,6 +159,7 @@
   <button id="btn-load" onclick="fetchGA4Data()">Načíst data</button>
   <div class="spacer"></div>
   <div class="user-info" id="user-info"></div>
+  <button onclick="doLogout()" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:6px;font-size:0.8rem;cursor:pointer;">Odhlásit</button>
 </div>
 
 <h1>GA4 E-commerce Dashboard</h1>
@@ -321,6 +322,17 @@ function initDates() {
 }
 
 // ── Google OAuth ──
+function doLogout() {
+  if (accessToken) {
+    google.accounts.oauth2.revoke(accessToken);
+  }
+  accessToken = null;
+  allData = [];
+  document.getElementById('dashboard-content').style.display = 'none';
+  document.getElementById('login-screen').style.display = '';
+  document.getElementById('user-info').textContent = '';
+}
+
 function doLogin() {
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
