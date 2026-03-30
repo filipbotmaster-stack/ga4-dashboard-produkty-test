@@ -299,8 +299,8 @@ function renderAll() {
 
 function renderConversionTables() {
   const min30 = allData.filter(r => r.views >= 30);
-  const best = [...min30].filter(r => r.purchases > 0).sort((a, b) => b.v2p - a.v2p).slice(0, 20);
-  const worstWithPurchase = [...min30].filter(r => r.purchases > 0).sort((a, b) => a.v2p - b.v2p).slice(0, 20);
+  const best = [...min30].filter(r => r.purchases > 0).sort((a, b) => b.v2p - a.v2p).slice(0, 20).sort((a, b) => b.views - a.views);
+  const worstWithPurchase = [...min30].filter(r => r.purchases > 0).sort((a, b) => a.v2p - b.v2p).slice(0, 20).sort((a, b) => b.views - a.views);
   const worstNoPurchase = [...min30].filter(r => r.purchases === 0).sort((a, b) => b.views - a.views).slice(0, 20);
 
   document.getElementById('best-conv').innerHTML = best.map((r, i) => `<tr>
