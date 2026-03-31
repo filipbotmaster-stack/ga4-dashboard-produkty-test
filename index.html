@@ -211,9 +211,9 @@
         <thead><tr>
           <th style="position:sticky;top:0;background:var(--card)">#</th>
           <th style="position:sticky;top:0;background:var(--card)">Produkt</th>
-          <th class="num" style="position:sticky;top:0;background:var(--card)">Zobr.</th>
-          <th class="num" style="position:sticky;top:0;background:var(--card)">Nákup</th>
-          <th class="num" style="position:sticky;top:0;background:var(--card)">V→P</th>
+          <th class="num conv-sort" data-table="best" data-key="views" style="position:sticky;top:0;background:var(--card);cursor:pointer">Zobrazení <span class="arrow"></span></th>
+          <th class="num conv-sort" data-table="best" data-key="purchases" style="position:sticky;top:0;background:var(--card);cursor:pointer">Nákupy <span class="arrow"></span></th>
+          <th class="num conv-sort" data-table="best" data-key="v2p" style="position:sticky;top:0;background:var(--card);cursor:pointer">View→Purchase <span class="arrow"></span></th>
         </tr></thead>
         <tbody id="best-conv"></tbody>
       </table>
@@ -226,9 +226,9 @@
         <thead><tr>
           <th style="position:sticky;top:0;background:var(--card)">#</th>
           <th style="position:sticky;top:0;background:var(--card)">Produkt</th>
-          <th class="num" style="position:sticky;top:0;background:var(--card)">Zobr.</th>
-          <th class="num" style="position:sticky;top:0;background:var(--card)">Nákup</th>
-          <th class="num" style="position:sticky;top:0;background:var(--card)">V→P</th>
+          <th class="num conv-sort" data-table="worst" data-key="views" style="position:sticky;top:0;background:var(--card);cursor:pointer">Zobrazení <span class="arrow"></span></th>
+          <th class="num conv-sort" data-table="worst" data-key="purchases" style="position:sticky;top:0;background:var(--card);cursor:pointer">Nákupy <span class="arrow"></span></th>
+          <th class="num conv-sort" data-table="worst" data-key="v2p" style="position:sticky;top:0;background:var(--card);cursor:pointer">View→Purchase <span class="arrow"></span></th>
         </tr></thead>
         <tbody id="worst-with-purchase"></tbody>
       </table>
@@ -241,9 +241,9 @@
         <thead><tr>
           <th style="position:sticky;top:0;background:var(--card)">#</th>
           <th style="position:sticky;top:0;background:var(--card)">Produkt</th>
-          <th class="num" style="position:sticky;top:0;background:var(--card)">Zobr.</th>
-          <th class="num" style="position:sticky;top:0;background:var(--card)">Košík</th>
-          <th class="num" style="position:sticky;top:0;background:var(--card)">V→C</th>
+          <th class="num conv-sort" data-table="nopurch" data-key="views" style="position:sticky;top:0;background:var(--card);cursor:pointer">Zobrazení <span class="arrow"></span></th>
+          <th class="num conv-sort" data-table="nopurch" data-key="carts" style="position:sticky;top:0;background:var(--card);cursor:pointer">Košík <span class="arrow"></span></th>
+          <th class="num conv-sort" data-table="nopurch" data-key="v2c" style="position:sticky;top:0;background:var(--card);cursor:pointer">View→Cart <span class="arrow"></span></th>
         </tr></thead>
         <tbody id="worst-no-purchase"></tbody>
       </table>
@@ -784,11 +784,27 @@ function renderAll() {
   renderTable();
 }
 
+// Conversion tables sort state
+const convSort = {
+  best: { key: 'v2p', dir: -1 },
+  worst: { key: 'v2p', dir: 1 },
+  nopurch: { key: 'views', dir: -1 }
+};
+
 function renderConversionTables() {
   const min30 = allData.filter(r => r.views >= 30);
-  const best = [...min30].filter(r => r.purchases > 0).sort((a, b) => b.v2p - a.v2p).slice(0, 20).sort((a, b) => b.views - a.views);
-  const worstWithPurchase = [...min30].filter(r => r.purchases > 0).sort((a, b) => a.v2p - b.v2p).slice(0, 20).sort((a, b) => b.views - a.views);
-  const worstNoPurchase = [...min30].filter(r => r.purchases === 0).sort((a, b) => b.views - a.views).slice(0, 20);
+
+  // Best: top 20 by v2p desc, then sort by user-selected column
+  const bestPool = [...min30].filter(r => r.purchases > 0).sort((a, b) => b.v2p - a.v2p).slice(0, 20);
+  const best = bestPool.sort((a, b) => convSort.best.dir * (a[convSort.best.key] - b[convSort.best.key]));
+
+  // Worst with purchase: top 20 by v2p asc, then sort
+  const worstPool = [...min30].filter(r => r.purchases > 0).sort((a, b) => a.v2p - b.v2p).slice(0, 20);
+  const worstWithPurchase = worstPool.sort((a, b) => convSort.worst.dir * (a[convSort.worst.key] - b[convSort.worst.key]));
+
+  // No purchase: top 20 by views desc, then sort
+  const nopurchPool = [...min30].filter(r => r.purchases === 0).sort((a, b) => b.views - a.views).slice(0, 20);
+  const worstNoPurchase = nopurchPool.sort((a, b) => convSort.nopurch.dir * (a[convSort.nopurch.key] - b[convSort.nopurch.key]));
 
   document.getElementById('best-conv').innerHTML = best.map((r, i) => `<tr>
     <td>${i + 1}</td><td>${detailName(r.name, 35)}</td>
@@ -804,7 +820,34 @@ function renderConversionTables() {
     <td>${i + 1}</td><td>${detailName(r.name, 35)}</td>
     <td class="num">${fmt(r.views)}</td><td class="num">${fmt(r.carts)}</td>
     <td class="rate-cell">${rateBadge(r.v2c)}</td></tr>`).join('');
+
+  // Update sort arrows
+  document.querySelectorAll('.conv-sort').forEach(th => {
+    const tbl = th.dataset.table;
+    const key = th.dataset.key;
+    const arrow = th.querySelector('.arrow');
+    if (convSort[tbl].key === key) {
+      arrow.textContent = convSort[tbl].dir === 1 ? '▲' : '▼';
+    } else {
+      arrow.textContent = '';
+    }
+  });
 }
+
+// Sort click handlers for conversion tables
+document.querySelectorAll('.conv-sort').forEach(th => {
+  th.addEventListener('click', () => {
+    const tbl = th.dataset.table;
+    const key = th.dataset.key;
+    if (convSort[tbl].key === key) {
+      convSort[tbl].dir *= -1;
+    } else {
+      convSort[tbl].key = key;
+      convSort[tbl].dir = -1;
+    }
+    renderConversionTables();
+  });
+});
 
 function renderCharts() {
   // Destroy old charts
