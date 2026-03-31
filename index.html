@@ -160,6 +160,10 @@
     <input type="date" id="date-to">
   </div>
   <div>
+    <label>Značka</label><br>
+    <select id="brand-filter"><option value="">Všechny značky</option></select>
+  </div>
+  <div>
     <label>Kategorie 1</label><br>
     <select id="cat1"><option value="">Všechny</option></select>
   </div>
@@ -314,6 +318,7 @@ let tokenClient = null;
 let allData = [];
 let rawRows = []; // raw parsed rows before category filtering
 let allCategories = { cat1: new Set(), cat2: new Set(), cat3: new Set() };
+let allBrands = new Set();
 let chartInstances = {};
 let sortCol = 'revenue';
 let sortDir = -1;
@@ -388,7 +393,8 @@ async function fetchGA4Data() {
   document.getElementById('app').style.display = 'none';
   document.getElementById('btn-load').disabled = true;
 
-  // Reset category filters on new fetch
+  // Reset filters on new fetch
+  document.getElementById('brand-filter').innerHTML = '<option value="">Všechny značky</option>';
   document.getElementById('cat1').innerHTML = '<option value="">Všechny</option>';
   document.getElementById('cat2').innerHTML = '<option value="">Všechny</option>';
   document.getElementById('cat3').innerHTML = '<option value="">Všechny</option>';
@@ -399,7 +405,8 @@ async function fetchGA4Data() {
       { name: 'itemName' },
       { name: 'itemCategory' },
       { name: 'itemCategory2' },
-      { name: 'itemCategory3' }
+      { name: 'itemCategory3' },
+      { name: 'itemBrand' }
     ],
     metrics: [
       { name: 'itemsViewed' },
@@ -453,20 +460,37 @@ function processGA4Response(data) {
     return;
   }
 
-  // Parse all rows with category info
-  const debugCats = { cat1: new Set(), cat2: new Set(), cat3: new Set() };
+  // Extract brand from itemBrand dimension or fallback to last word(s) of product name
+  function extractBrand(brandDim, name) {
+    if (brandDim && brandDim !== '(not set)' && brandDim.trim()) return brandDim.trim();
+    // Fallback: last uppercase word(s) in product name (e.g. "... STEFANPLAST" or "... ASIST s...")
+    const parts = name.trim().split(/\s+/);
+    // Try last word if uppercase
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (parts[i].length >= 3 && parts[i] === parts[i].toUpperCase() && /^[A-ZÀ-Ž0-9]/.test(parts[i])) {
+        return parts.slice(i).filter(p => p === p.toUpperCase() && p.length >= 2).join(' ');
+      }
+    }
+    return '';
+  }
+
+  // Parse all rows with category + brand info
+  const debugCats = { cat1: new Set(), cat2: new Set(), cat3: new Set(), brands: new Set() };
   for (const row of data.rows) {
     const name = row.dimensionValues[0].value;
     const c1 = row.dimensionValues[1].value || '';
     const c2 = row.dimensionValues[2].value || '';
     const c3 = row.dimensionValues[3].value || '';
+    const brandRaw = row.dimensionValues[4]?.value || '';
+    const brand = extractBrand(brandRaw, name);
 
     debugCats.cat1.add(c1);
     debugCats.cat2.add(c2);
     debugCats.cat3.add(c3);
+    if (brand) debugCats.brands.add(brand);
 
     rawRows.push({
-      name,
+      name, brand,
       cat1: (c1 && c1 !== '(not set)') ? c1 : '',
       cat2: (c2 && c2 !== '(not set)') ? c2 : '',
       cat3: (c3 && c3 !== '(not set)') ? c3 : '',
@@ -477,15 +501,16 @@ function processGA4Response(data) {
     });
   }
 
-  // DEBUG: show what GA4 returns for categories
+  // DEBUG
   console.log('=== GA4 DEBUG ===');
   console.log('Total rows:', data.rows.length);
   console.log('itemCategory values:', [...debugCats.cat1]);
   console.log('itemCategory2 values:', [...debugCats.cat2]);
   console.log('itemCategory3 values:', [...debugCats.cat3]);
+  console.log('itemBrand values:', [...debugCats.brands]);
   console.log('Sample rows (first 5):');
   data.rows.slice(0, 5).forEach((r, i) => {
-    console.log(`  [${i}] name="${r.dimensionValues[0].value}" cat1="${r.dimensionValues[1].value}" cat2="${r.dimensionValues[2].value}" cat3="${r.dimensionValues[3].value}"`);
+    console.log(`  [${i}] name="${r.dimensionValues[0].value}" brand="${r.dimensionValues[4]?.value}" cat1="${r.dimensionValues[1].value}"`);
   });
 
   const from = document.getElementById('date-from').value;
@@ -497,30 +522,37 @@ function processGA4Response(data) {
 }
 
 function applyCategoryFilter() {
+  const selBrand = document.getElementById('brand-filter').value;
   const selCat1 = document.getElementById('cat1').value;
   const selCat2 = document.getElementById('cat2').value;
   const selCat3 = document.getElementById('cat3').value;
 
-  // Filter raw rows by selected categories
+  // Filter raw rows by brand + categories
   let filtered = rawRows;
+  if (selBrand) filtered = filtered.filter(r => r.brand === selBrand);
   if (selCat1) filtered = filtered.filter(r => r.cat1 === selCat1);
   if (selCat2) filtered = filtered.filter(r => r.cat2 === selCat2);
   if (selCat3) filtered = filtered.filter(r => r.cat3 === selCat3);
 
-  // Build available categories from filtered data (cascading)
+  // Build available brands (always from rawRows, unaffected by categories)
+  const availBrands = new Set();
+  rawRows.forEach(r => { if (r.brand) availBrands.add(r.brand); });
+  updateDropdown('brand-filter', availBrands, selBrand, 'Všechny značky');
+
+  // Build available categories — cascading with brand filter
   const availCat1 = new Set();
   const availCat2 = new Set();
   const availCat3 = new Set();
 
-  // Cat1: always show all from rawRows
-  rawRows.forEach(r => { if (r.cat1) availCat1.add(r.cat1); });
+  // Base rows (filtered by brand if selected)
+  const baseRows = selBrand ? rawRows.filter(r => r.brand === selBrand) : rawRows;
 
-  // Cat2: filter by selected cat1
-  const rowsForCat2 = selCat1 ? rawRows.filter(r => r.cat1 === selCat1) : rawRows;
+  baseRows.forEach(r => { if (r.cat1) availCat1.add(r.cat1); });
+
+  const rowsForCat2 = selCat1 ? baseRows.filter(r => r.cat1 === selCat1) : baseRows;
   rowsForCat2.forEach(r => { if (r.cat2) availCat2.add(r.cat2); });
 
-  // Cat3: filter by selected cat1 + cat2
-  let rowsForCat3 = rawRows;
+  let rowsForCat3 = baseRows;
   if (selCat1) rowsForCat3 = rowsForCat3.filter(r => r.cat1 === selCat1);
   if (selCat2) rowsForCat3 = rowsForCat3.filter(r => r.cat2 === selCat2);
   rowsForCat3.forEach(r => { if (r.cat3) availCat3.add(r.cat3); });
@@ -553,17 +585,23 @@ function applyCategoryFilter() {
   renderAll();
 }
 
-function updateDropdown(id, values, current) {
+function updateDropdown(id, values, current, placeholder = 'Všechny') {
   const sel = document.getElementById(id);
   const sorted = [...values].sort((a, b) => a.localeCompare(b, 'cs'));
-  const opts = ['<option value="">Všechny</option>'];
+  const opts = [`<option value="">${placeholder}</option>`];
   sorted.forEach(v => {
     opts.push(`<option value="${v}" ${v === current ? 'selected' : ''}>${v}</option>`);
   });
   sel.innerHTML = opts.join('');
 }
 
-// Category change handlers — cascading
+// Brand + Category change handlers — cascading
+document.getElementById('brand-filter').addEventListener('change', () => {
+  document.getElementById('cat1').value = '';
+  document.getElementById('cat2').value = '';
+  document.getElementById('cat3').value = '';
+  applyCategoryFilter();
+});
 document.getElementById('cat1').addEventListener('change', () => {
   document.getElementById('cat2').value = '';
   document.getElementById('cat3').value = '';
