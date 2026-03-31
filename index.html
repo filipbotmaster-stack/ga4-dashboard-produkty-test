@@ -454,11 +454,16 @@ function processGA4Response(data) {
   }
 
   // Parse all rows with category info
+  const debugCats = { cat1: new Set(), cat2: new Set(), cat3: new Set() };
   for (const row of data.rows) {
     const name = row.dimensionValues[0].value;
     const c1 = row.dimensionValues[1].value || '';
     const c2 = row.dimensionValues[2].value || '';
     const c3 = row.dimensionValues[3].value || '';
+
+    debugCats.cat1.add(c1);
+    debugCats.cat2.add(c2);
+    debugCats.cat3.add(c3);
 
     rawRows.push({
       name,
@@ -471,6 +476,17 @@ function processGA4Response(data) {
       revenue: parseFloat(row.metricValues[3].value) || 0
     });
   }
+
+  // DEBUG: show what GA4 returns for categories
+  console.log('=== GA4 DEBUG ===');
+  console.log('Total rows:', data.rows.length);
+  console.log('itemCategory values:', [...debugCats.cat1]);
+  console.log('itemCategory2 values:', [...debugCats.cat2]);
+  console.log('itemCategory3 values:', [...debugCats.cat3]);
+  console.log('Sample rows (first 5):');
+  data.rows.slice(0, 5).forEach((r, i) => {
+    console.log(`  [${i}] name="${r.dimensionValues[0].value}" cat1="${r.dimensionValues[1].value}" cat2="${r.dimensionValues[2].value}" cat3="${r.dimensionValues[3].value}"`);
+  });
 
   const from = document.getElementById('date-from').value;
   const to = document.getElementById('date-to').value;
