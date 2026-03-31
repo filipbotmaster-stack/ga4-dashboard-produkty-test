@@ -742,12 +742,12 @@ function renderConversionTables() {
     <td class="rate-cell">${rateBadge(r.v2p)}</td></tr>`).join('');
 
   document.getElementById('worst-with-purchase').innerHTML = worstWithPurchase.map((r, i) => `<tr>
-    <td>${i + 1}</td><td>${clickableName(r.name, 35)}</td>
+    <td>${i + 1}</td><td>${detailName(r.name, 35)}</td>
     <td class="num">${fmt(r.views)}</td><td class="num">${fmt(r.purchases)}</td>
     <td class="rate-cell">${rateBadge(r.v2p)}</td></tr>`).join('');
 
   document.getElementById('worst-no-purchase').innerHTML = worstNoPurchase.map((r, i) => `<tr>
-    <td>${i + 1}</td><td>${clickableName(r.name, 35)}</td>
+    <td>${i + 1}</td><td>${detailName(r.name, 35)}</td>
     <td class="num">${fmt(r.views)}</td><td class="num">${fmt(r.carts)}</td>
     <td class="rate-cell">${rateBadge(r.v2c)}</td></tr>`).join('');
 }
@@ -831,7 +831,7 @@ function renderTable() {
   const page = data.slice(start, start + pageSize);
 
   document.getElementById('tbody').innerHTML = page.map(r => `<tr>
-    <td>${clickableName(r.name, 60)}</td>
+    <td>${detailName(r.name, 60)}</td>
     <td class="num">${fmt(r.views)}</td><td class="num">${fmt(r.carts)}</td>
     <td class="num">${fmt(r.purchases)}</td><td class="num">${fmt(r.revenue)}</td>
     <td class="rate-cell">${rateBadge(r.v2c)}</td><td class="rate-cell">${rateBadge(r.c2p)}</td>
