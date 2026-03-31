@@ -71,6 +71,20 @@
   .copy-toast { position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;padding:8px 20px;border-radius:8px;font-size:0.85rem;font-weight:600;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none; }
   .copy-toast.show { opacity:1; }
 
+  /* Product detail modal */
+  .modal-overlay { position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:900;display:flex;align-items:center;justify-content:center; }
+  .modal { background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;width:700px;max-width:92vw;max-height:85vh;overflow-y:auto;position:relative; }
+  .modal h3 { font-size:1rem;margin-bottom:4px;padding-right:30px; }
+  .modal .modal-sub { color:var(--muted);font-size:0.8rem;margin-bottom:16px; }
+  .modal-close { position:absolute;top:16px;right:16px;background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;line-height:1; }
+  .modal-close:hover { color:var(--text); }
+  .modal-kpis { display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px; }
+  .modal-kpi { background:var(--bg);border-radius:8px;padding:12px;text-align:center; }
+  .modal-kpi .mk-val { font-size:1.2rem;font-weight:700; }
+  .modal-kpi .mk-lbl { font-size:0.7rem;color:var(--muted);margin-top:2px; }
+  .modal canvas { max-height:250px; }
+  .modal-loading { text-align:center;padding:40px;color:var(--muted); }
+
   /* Top bar */
   .top-bar { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
   .top-bar label { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -101,6 +115,7 @@
 <body>
 
 <div class="copy-toast" id="copy-toast">Zkopirováno!</div>
+<div id="product-modal" style="display:none"></div>
 
 <!-- Auth gate -->
 <div id="auth-gate">
@@ -572,6 +587,117 @@ function copyName(name) {
   setTimeout(() => toast.classList.remove('show'), 1500);
 }
 
+function detailName(name, max) {
+  const escaped = name.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  return `<span class="copyable" onclick="openProductDetail('${escaped}')" title="${escaped}">${shortName(name, max)}</span>`;
+}
+
+let modalChart = null;
+
+async function openProductDetail(name) {
+  const modal = document.getElementById('product-modal');
+  const product = allData.find(r => r.name === name);
+  if (!product) return;
+
+  modal.style.display = '';
+  modal.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <button class="modal-close" onclick="closeModal()">×</button>
+      <h3>${name}</h3>
+      <div class="modal-sub">Období: ${document.getElementById('date-from').value} – ${document.getElementById('date-to').value}</div>
+      <div class="modal-kpis">
+        <div class="modal-kpi"><div class="mk-val" style="color:var(--accent)">${fmt(product.views)}</div><div class="mk-lbl">Zobrazení</div></div>
+        <div class="modal-kpi"><div class="mk-val" style="color:var(--yellow)">${fmt(product.carts)}</div><div class="mk-lbl">Do košíku</div></div>
+        <div class="modal-kpi"><div class="mk-val" style="color:var(--green)">${fmt(product.purchases)}</div><div class="mk-lbl">Nákupy</div></div>
+        <div class="modal-kpi"><div class="mk-val" style="color:var(--purple)">${fmt(product.revenue)} Kč</div><div class="mk-lbl">Tržba</div></div>
+      </div>
+      <div class="modal-loading"><div class="spinner"></div><p>Načítám denní data...</p></div>
+      <canvas id="modal-chart" style="display:none"></canvas>
+    </div>
+  </div>`;
+
+  // Fetch daily data for this product
+  try {
+    const body = {
+      dateRanges: [{ startDate: document.getElementById('date-from').value, endDate: document.getElementById('date-to').value }],
+      dimensions: [{ name: 'date' }],
+      metrics: [
+        { name: 'itemsViewed' },
+        { name: 'itemsAddedToCart' },
+        { name: 'itemsPurchased' },
+        { name: 'itemRevenue' }
+      ],
+      dimensionFilter: {
+        filter: { fieldName: 'itemName', stringFilter: { value: name, matchType: 'EXACT' } }
+      },
+      orderBys: [{ dimension: { dimensionName: 'date' }, desc: false }],
+      limit: 366
+    };
+
+    const resp = await fetch(
+      `https://analyticsdata.googleapis.com/v1beta/properties/${GA4_PROPERTY_ID}:runReport`,
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }
+    );
+
+    if (!resp.ok) throw new Error('API error');
+    const data = await resp.json();
+
+    const dates = [];
+    const views = [];
+    const carts = [];
+    const purchases = [];
+
+    if (data.rows) {
+      for (const row of data.rows) {
+        const d = row.dimensionValues[0].value; // YYYYMMDD
+        dates.push(d.substring(6, 8) + '.' + d.substring(4, 6) + '.');
+        views.push(parseFloat(row.metricValues[0].value) || 0);
+        carts.push(parseFloat(row.metricValues[1].value) || 0);
+        purchases.push(parseFloat(row.metricValues[2].value) || 0);
+      }
+    }
+
+    const loadingEl = modal.querySelector('.modal-loading');
+    const canvasEl = document.getElementById('modal-chart');
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (canvasEl) {
+      canvasEl.style.display = '';
+      if (modalChart) modalChart.destroy();
+      modalChart = new Chart(canvasEl, {
+        type: 'line',
+        data: {
+          labels: dates,
+          datasets: [
+            { label: 'Zobrazení', data: views, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3 },
+            { label: 'Do košíku', data: carts, borderColor: '#eab308', backgroundColor: 'rgba(234,179,8,0.1)', fill: true, tension: 0.3 },
+            { label: 'Nákupy', data: purchases, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', fill: true, tension: 0.3 }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: '#94a3b8' } } },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: '#334155' } },
+            y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, beginAtZero: true }
+          }
+        }
+      });
+    }
+  } catch (e) {
+    const loadingEl = modal.querySelector('.modal-loading');
+    if (loadingEl) loadingEl.innerHTML = '<p style="color:var(--red)">Nepodařilo se načíst denní data.</p>';
+  }
+}
+
+function closeModal() {
+  document.getElementById('product-modal').style.display = 'none';
+  if (modalChart) { modalChart.destroy(); modalChart = null; }
+}
+
 // ── Render ──
 function renderAll() {
   const totalViews = allData.reduce((s, r) => s + r.views, 0);
@@ -611,7 +737,7 @@ function renderConversionTables() {
   const worstNoPurchase = [...min30].filter(r => r.purchases === 0).sort((a, b) => b.views - a.views).slice(0, 20);
 
   document.getElementById('best-conv').innerHTML = best.map((r, i) => `<tr>
-    <td>${i + 1}</td><td>${clickableName(r.name, 35)}</td>
+    <td>${i + 1}</td><td>${detailName(r.name, 35)}</td>
     <td class="num">${fmt(r.views)}</td><td class="num">${fmt(r.purchases)}</td>
     <td class="rate-cell">${rateBadge(r.v2p)}</td></tr>`).join('');
 
