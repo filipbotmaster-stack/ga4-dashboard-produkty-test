@@ -141,6 +141,24 @@
   </div>
 </div>
 
+<!-- Property picker -->
+<div id="property-picker" style="display:none">
+  <div style="max-width:500px;margin:80px auto;text-align:center;">
+    <h1 style="margin-bottom:8px;">Vyberte GA4 Property</h1>
+    <p style="color:var(--muted);margin-bottom:24px;" id="picker-user"></p>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:32px;">
+      <div id="picker-loading"><div class="spinner"></div><p style="color:var(--muted)">Načítám dostupné properties...</p></div>
+      <div id="picker-list" style="display:none">
+        <select id="property-select" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:8px;font-size:0.95rem;margin-bottom:16px;">
+        </select>
+        <button onclick="selectProperty()" style="background:var(--accent);color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:0.95rem;font-weight:600;cursor:pointer;width:100%;">Otevřít dashboard</button>
+      </div>
+      <div id="picker-error" style="display:none;color:var(--red);margin-top:12px;font-size:0.85rem;"></div>
+    </div>
+    <button onclick="doLogout()" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 16px;border-radius:6px;font-size:0.85rem;cursor:pointer;margin-top:16px;">Odhlásit se</button>
+  </div>
+</div>
+
 <!-- Loading screen -->
 <div id="loading-screen" style="display:none">
   <div class="spinner"></div>
@@ -178,6 +196,7 @@
   <button id="btn-load" onclick="fetchGA4Data()">Načíst data</button>
   <div class="spacer"></div>
   <div class="user-info" id="user-info"></div>
+  <button onclick="changeProperty()" style="background:transparent;border:1px solid var(--accent);color:var(--accent);padding:6px 12px;border-radius:6px;font-size:0.8rem;cursor:pointer;">Změnit property</button>
   <button onclick="doLogout()" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:6px;font-size:0.8rem;cursor:pointer;">Odhlásit</button>
 </div>
 
@@ -310,8 +329,8 @@
 // ── Config ──
 const ACCESS_HASH = '7b9df9e2da370a8dd244';
 const CLIENT_ID = '877418440486-j5bk694o6mat30b6jc1kluk5jbi0rjil.apps.googleusercontent.com';
-const SCOPES = 'https://www.googleapis.com/auth/analytics.readonly';
-let GA4_PROPERTY_ID = '266107766';
+const SCOPES = 'https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/analytics.edit';
+let GA4_PROPERTY_ID = '';
 
 let accessToken = null;
 let tokenClient = null;
@@ -349,10 +368,14 @@ function doLogout() {
   }
   accessToken = null;
   allData = [];
+  GA4_PROPERTY_ID = '';
   document.getElementById('dashboard-content').style.display = 'none';
+  document.getElementById('property-picker').style.display = 'none';
   document.getElementById('login-screen').style.display = '';
   document.getElementById('user-info').textContent = '';
 }
+
+let currentUserEmail = '';
 
 function doLogin() {
   tokenClient = google.accounts.oauth2.initTokenClient({
@@ -362,26 +385,104 @@ function doLogin() {
       if (resp.error) { alert('Chyba přihlášení: ' + resp.error); return; }
       accessToken = resp.access_token;
       document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('dashboard-content').style.display = '';
       // Get user info
       fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
         headers: { Authorization: 'Bearer ' + accessToken }
       }).then(r => r.json()).then(u => {
-        document.getElementById('user-info').textContent = u.email || '';
+        currentUserEmail = u.email || '';
+        document.getElementById('user-info').textContent = currentUserEmail;
+        document.getElementById('picker-user').textContent = currentUserEmail;
       });
-      promptPropertyId();
+      showPropertyPicker();
     }
   });
   tokenClient.requestAccessToken();
 }
 
-function promptPropertyId() {
-  if (GA4_PROPERTY_ID) { fetchGA4Data(); return; }
-  const pid = prompt('Zadejte GA4 Property ID (číslo, např. 123456789):');
-  if (pid && pid.trim()) {
-    GA4_PROPERTY_ID = pid.trim();
-    fetchGA4Data();
+async function showPropertyPicker() {
+  document.getElementById('property-picker').style.display = '';
+  document.getElementById('picker-loading').style.display = '';
+  document.getElementById('picker-list').style.display = 'none';
+  document.getElementById('picker-error').style.display = 'none';
+
+  try {
+    // Fetch all GA4 accounts & properties using Admin API
+    const resp = await fetch('https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200', {
+      headers: { Authorization: 'Bearer ' + accessToken }
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error?.message || resp.statusText);
+    }
+
+    const data = await resp.json();
+    const select = document.getElementById('property-select');
+    select.innerHTML = '';
+
+    if (!data.accountSummaries || data.accountSummaries.length === 0) {
+      throw new Error('Žádné GA4 účty nalezeny pro tento Google účet.');
+    }
+
+    const properties = [];
+    for (const account of data.accountSummaries) {
+      const accountName = account.displayName || account.account;
+      if (account.propertySummaries) {
+        for (const prop of account.propertySummaries) {
+          const propId = prop.property.replace('properties/', '');
+          const propName = prop.displayName || propId;
+          properties.push({ id: propId, label: `${accountName} → ${propName}`, name: propName });
+        }
+      }
+    }
+
+    if (properties.length === 0) {
+      throw new Error('Žádné GA4 properties nalezeny.');
+    }
+
+    properties.sort((a, b) => a.label.localeCompare(b.label, 'cs'));
+    properties.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.label;
+      select.appendChild(opt);
+    });
+
+    document.getElementById('picker-loading').style.display = 'none';
+    document.getElementById('picker-list').style.display = '';
+
+  } catch (e) {
+    document.getElementById('picker-loading').style.display = 'none';
+    document.getElementById('picker-error').style.display = '';
+    document.getElementById('picker-error').textContent = e.message;
+    // Fallback: manual input
+    document.getElementById('picker-list').style.display = '';
+    const select = document.getElementById('property-select');
+    select.innerHTML = '';
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '— Zadejte ID ručně —';
+    select.appendChild(opt);
   }
+}
+
+function changeProperty() {
+  GA4_PROPERTY_ID = '';
+  document.getElementById('dashboard-content').style.display = 'none';
+  showPropertyPicker();
+}
+
+function selectProperty() {
+  let propId = document.getElementById('property-select').value;
+  if (!propId) {
+    propId = prompt('Zadejte GA4 Property ID (číslo):');
+    if (!propId || !propId.trim()) return;
+    propId = propId.trim();
+  }
+  GA4_PROPERTY_ID = propId;
+  document.getElementById('property-picker').style.display = 'none';
+  document.getElementById('dashboard-content').style.display = '';
+  fetchGA4Data();
 }
 
 // ── GA4 Data API ──
